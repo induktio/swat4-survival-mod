@@ -6,11 +6,11 @@
 
 class Main extends SwatGame.SwatMutator;
 
-const VERSION = "1.0";
+const VERSION = "1.1";
 const MAX_ITER = 200;
 
 var config bool Enabled;
-var config bool RandomDoors;
+var config int RandomDoors;
 var config int AmountMin;
 var config int AmountExtra;
 var config int WaveSpawns;
@@ -44,7 +44,7 @@ public function PreBeginPlay() {
 
 
 public function PostBeginPlay() {
-    local int i, num, rnd, minimum;
+    local int i, num, minimum;
     local string type;
     local bool usable;
     local EnemySpawner Spawner;
@@ -142,20 +142,21 @@ public function PostBeginPlay() {
     }
     log("SurvivalMod TotalSuspects=" $ self.TotalSuspects $ " NewSuspects=" $ num);
     
-    if (self.RandomDoors) {
+    if (self.RandomDoors > 0) {
         for(Iter = Level.navigationPointList; Iter != None; Iter = Iter.nextNavigationPoint) {
             Door = SwatDoor(Iter);
 
             if (Door != None && Door.bIsAntiPortal) {
-                rnd = Rand(8);
-                if (rnd == 0) {
-                    log("SurvivalMod Door " $ Door $ " -> OpenLeft");
-                    Door.SetPositionForMove(DoorPosition_OpenLeft, MR_Interacted);
-                    Door.OnUnlocked();
-                } else if (rnd == 1) {
-                    log("SurvivalMod Door " $ Door $ " -> OpenRight");
-                    Door.SetPositionForMove(DoorPosition_OpenRight, MR_Interacted);
-                    Door.OnUnlocked();
+                if (Rand(100) < self.RandomDoors) {
+                    if (Rand(2) == 0) {
+                        log("SurvivalMod Door " $ Door $ " -> OpenLeft");
+                        Door.SetPositionForMove(DoorPosition_OpenLeft, MR_Interacted);
+                        Door.OnUnlocked();
+                    } else {
+                        log("SurvivalMod Door " $ Door $ " -> OpenRight");
+                        Door.SetPositionForMove(DoorPosition_OpenRight, MR_Interacted);
+                        Door.OnUnlocked();
+                    }
                 } else {
                     log("SurvivalMod Door " $ Door $ " -> NoChange");
                 }
