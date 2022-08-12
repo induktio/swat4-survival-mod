@@ -17,6 +17,7 @@ Currently this mod is only implemented as a server side mod, single player mode 
 
 As an optional feature, the mod can also open some doors randomly on the map.
 This brings much more variety to the gameplay as normally almost all of the doors are closed.
+It is also possible to change the game to enforce less use of force penalties while playing the mod.
 
 
 Installation
@@ -28,11 +29,14 @@ Installation
 
 ```
 [Engine.GameEngine]
-ServerActors=SurvivalMod.Main
+ServerActors=SurvivalMod.SVMod
 
-[SurvivalMod.Main]
-; Allow starting Survival Mod (True/False)
+[SurvivalMod.SVMod]
+; Allow starting Survival Mod (True/False).
 Enabled=True
+; Enforce unauthorized use of force penalties during gameplay (True/False).
+; If the suspects drop their weapons, use of force is penalized in any case.
+ForcePenalties=True
 ; Choose how often to open doors randomly at the round start.
 ; Values allowed: 0-100, 0 = disable this feature.
 RandomDoors=25
@@ -55,8 +59,7 @@ WaveSize=0.5
 ; One or more must be specified and will be chosen randomly.
 Archetypes=Red_Thief_Armor
 Archetypes=Hotel_Bomber
-Archetypes=Custom_Terrorists
-Archetypes=Custom_Terrorist_GasMask
+Archetypes=Jewel_FreedomNow_GasMask
 
 ; These archetypes are for TSS expansion only.
 Archetypes=Office_Farmer
@@ -66,8 +69,28 @@ Archetypes=HalfwayHouse_Robber_SAW
 ```
 
 
+Event Logger
+------------
+As an optional feature, the mod includes the Event Logger module for COOP that displays gameplay
+events such as kills, arrests, bomb defusals and similar in the message area. After a round ends,
+the elapsed time is also displayed during the score screen.
+
+This module can be used separately from Survival Mod, and it is not dependent on the config used
+by Survival Mod in any way. To install Event Logger, enter these lines in SWAT4(X)DedicatedServer.ini.
+
+```
+[Engine.GameEngine]
+ServerActors=EventLogger.EventMod
+```
+
+
 Changelog
 ---------
+### v1.2
+* Add new config option ForcePenalties to choose if the game should enforce unauthorized use of force penalties.
+* Whenever one of the suspects is neutralized, the others are now much more likely to move to the location to investigate noise.
+* The module name used by the mod is changed to SurvivalMod.SVMod. This must be updated in the config file.
+* Event Logger module for COOP is now included with the mod as an optional feature.
 
 ### v1.1
 * Before spawning the next wave, a new "10 seconds" warning is displayed near the middle of the screen.

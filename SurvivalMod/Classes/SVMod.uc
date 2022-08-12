@@ -4,12 +4,18 @@
  ****************************************
  */
 
-class Main extends SwatGame.SwatMutator;
+class SVMod extends SwatGame.SwatMutator
+    implements IInterested_GameEvent_PawnDied,
+               IInterested_GameEvent_PawnIncapacitated,
+               IInterested_GameEvent_PawnArrested,
+               IInterested_GameEvent_PawnDamaged;
 
-const VERSION = "1.1";
+const VERSION = "1.2";
 const MAX_ITER = 200;
 
 var config bool Enabled;
+var config bool CheckNoise;
+var config bool ForcePenalties;
 var config int RandomDoors;
 var config int AmountMin;
 var config int AmountExtra;
@@ -19,14 +25,28 @@ var config float WaveSize;
 var config float MinDistance;
 var config array<string> Archetypes;
 
-var protected int WaveCount;
+var protected int WavesLeft;
 var protected int SpawnTimer;
 var protected int TotalSuspects;
 var protected array<EnemySpawner> AllSpawns;
 var protected array<Actor> AllPoints;
+var protected array<float> GoalUpdateTime;
 var protected Procedure_KillSuspects ProcKill;
 var protected Procedure_ArrestIncapacitatedSuspects ProcIncap;
 var protected Procedure_ArrestUnIncapacitatedSuspects ProcArrest;
+var protected SwatGameInfo Game;
+
+defaultproperties
+{
+    Enabled = True
+    CheckNoise = True
+    ForcePenalties = True
+    RandomDoors = 25
+    AmountMin = 10
+    AmountExtra = 10
+    WaveSpawns = 0
+}
+
 
 public function PreBeginPlay() {
     Super.PreBeginPlay();
@@ -38,10 +58,21 @@ public function PreBeginPlay() {
             }
        }
     }
-    log("SurvivalMod is unable to start: mode=" $ Level.NetMode $ " level=" $ Level.Game);
+    log("SurvivalMod is unable to start: NetMode=" $ Level.NetMode $ " Level=" $ Level.Game);
     self.Destroy();
 }
 
+function UnRegisterGameEventsHook() {
+    self.Game.GameEvents.PawnDied.UnRegister(self);
+    self.Game.GameEvents.PawnIncapacitated.UnRegister(self);
+    self.Game.GameEvents.PawnArrested.UnRegister(self);
+    self.Game.GameEvents.PawnDamaged.UnRegister(self);
+}
+
+event Destroyed() {
+    log("SurvivalMod is about to be closed");
+    Super.Destroyed();
+}
 
 public function PostBeginPlay() {
     local int i, num, minimum;
@@ -58,11 +89,17 @@ public function PostBeginPlay() {
     local PathNode Node;
 
     Super.PostBeginPlay();
-    self.WaveCount = 0;
+    self.WavesLeft = self.WaveSpawns;
     self.SpawnTimer = 0;
     self.TotalSuspects = 0;
 
-    log("SurvivalMod v" $ class'Main'.const.VERSION $ " by Induktio has been loaded");
+    self.Game = SwatGameInfo(Level.Game);
+    self.Game.GameEvents.PawnDied.Register(self);
+    self.Game.GameEvents.PawnIncapacitated.Register(self);
+    self.Game.GameEvents.PawnArrested.Register(self);
+    self.Game.GameEvents.PawnDamaged.Register(self);
+
+    log("SurvivalMod v" $ class'SVMod'.const.VERSION $ " by Induktio has been loaded");
     log("SurvivalMod Archetypes=" $ self.Archetypes.Length $ " Minimum=" $ self.AmountMin $ " Extra=" $ self.AmountExtra
         $ " RandomDoors=" $ self.RandomDoors $ " MinDistance=" $ self.MinDistance $ " WaveSpawns=" $ self.WaveSpawns
         $ " WaveTrigger=" $ self.WaveTrigger $ " WaveSize=" $ self.WaveSize);
@@ -118,11 +155,11 @@ public function PostBeginPlay() {
         minimum = self.AmountMin - self.TotalSuspects;
     }
     
-    for (i = 0; num < minimum + self.AmountExtra && i < class'Main'.const.MAX_ITER; i++) {
+    for (i = 0; num < minimum + self.AmountExtra && i < class'SVMod'.const.MAX_ITER; i++) {
         type = self.Archetypes[ Rand(self.Archetypes.Length) ];
         if (i % 2 == 0 && AllPoints.Length >= 4) {
             Target = AllPoints[ Rand(AllPoints.Length) ];
-            usable = (!PointsNear(StartPoints, Target, true) || i >= class'Main'.const.MAX_ITER/2);
+            usable = (!PointsNear(StartPoints, Target, true) || i >= class'SVMod'.const.MAX_ITER/2);
             if (usable && PointSpawn(name(type), Target) != None) {
                 log("SurvivalMod added " $ type $ " at " $ Target);
                 self.TotalSuspects++;
@@ -131,7 +168,7 @@ public function PostBeginPlay() {
         } else {
             Spawner = AllSpawns[ Rand(AllSpawns.Length) ];
             usable = ((Spawner.MissionSpawn == MissionSpawn_Any && Spawner.StartPointDependent == StartPoint_Any)
-                || i >= class'Main'.const.MAX_ITER/2);
+                || i >= class'SVMod'.const.MAX_ITER/2);
             
             if (!Spawner.HasSpawned && usable && Spawner.SpawnArchetype(name(type), false) != None) {
                 log("SurvivalMod added " $ type $ " at " $ Spawner);
@@ -166,8 +203,6 @@ public function PostBeginPlay() {
     }
     if (self.WaveSpawns > 0) {
         self.SetTimer(1.0, true);
-    } else {
-        self.Destroy();
     }
 }
 
@@ -190,11 +225,21 @@ protected function bool PointsNear(array<Actor> Points, Actor Target, bool dotra
     return false;
 }
 
+protected function bool PlayersNear(array<PlayerController> Players, Actor Target) {
+    local bool near;
+    local int i;
+    for (i = 0; i < Players.Length; i++) {
+        near = Players[i].LineOfSightTo(Target);
+        if (near) return true;
+    }
+    return false;
+}
+
 protected function Actor PointSpawn(name ArchetypeName, Actor Point) {
     local Archetype Archetype;
     local class<Actor> ClassToSpawn;
     local Actor Spawned;
-        
+
     Archetype = new(None, string(ArchetypeName), 0) class'EnemyArchetype';
     if (Archetype == None) {
         return None;
@@ -209,27 +254,15 @@ protected function Actor PointSpawn(name ArchetypeName, Actor Point) {
     return Spawned;
 }
 
-protected function bool PlayersNear(array<PlayerController> Players, Actor Target) {
-    local bool near;
-    local int i;
-    for (i = 0; i < Players.Length; i++) {
-        near = Players[i].LineOfSightTo(Target);
-        //log("SurvivalMod LOS " $ Players[i] $ " " $ Target $ " " $ near);
-        if (near) return true;
-    }
-    return false;
-}
-
 event Timer() {
-    local SwatEnemy Enemy;
-    local int alive, i, num;
+    local int i, num;
     local EnemySpawner Spawner;
     local string type;
     local array<PlayerController> Players;
     local PlayerController Player;
     local SwatRepo Repo;
     local Actor Point, Spawned;
-    
+
     Repo = SwatRepo(Level.GetRepo());
     if (Repo.GuiConfig.CurrentMission.IsMissionCompleted()) {
         self.Destroy();
@@ -237,24 +270,11 @@ event Timer() {
     if (Repo.GuiConfig.SwatGameState != GAMESTATE_MidGame) {
         return;
     }
-    if (self.WaveCount >= self.WaveSpawns) {
-        Level.Game.Broadcast(None, 
-            "[c=00ff00]Good! The suspects have run out of reinforcements.", 'Caption');
+    if (self.ForcePenalties && !self.CheckNoise && self.WavesLeft == 0) {
         self.Destroy();
     }
 
-    if (self.SpawnTimer <= 0) {
-        alive = 0;
-        foreach DynamicActors(class'SwatEnemy', Enemy) {
-            if (Enemy.IsConscious() && !Enemy.IsArrested()) {
-                alive++;
-            }
-        }
-        if (alive < self.TotalSuspects * self.WaveTrigger) {
-            self.SpawnTimer = 10;
-            Level.Game.Broadcast(None, '', 'TenSecWarning');
-        }
-    } else {
+    if (self.SpawnTimer > 0) {
         self.SpawnTimer--;
         if (self.SpawnTimer <= 0) {
             num = 0;
@@ -266,7 +286,7 @@ event Timer() {
                     i++;
                 }
             }
-            for (i = 0; num < self.TotalSuspects * self.WaveSize && i < class'Main'.const.MAX_ITER; i++) {
+            for (i = 0; num < self.TotalSuspects * self.WaveSize && i < class'SVMod'.const.MAX_ITER; i++) {
                 type = self.Archetypes[ Rand(self.Archetypes.Length) ];
                 Spawned = None;
                 
@@ -278,12 +298,12 @@ event Timer() {
                 } else {
                     Spawner = AllSpawns[ Rand(AllSpawns.Length) ];
                     Point = Spawner;
-                    if (!self.PlayersNear(Players, Spawner) || i >= class'Main'.const.MAX_ITER/2) {
+                    if (!self.PlayersNear(Players, Spawner) || i >= class'SVMod'.const.MAX_ITER/2) {
                         Spawned = Spawner.SpawnArchetype(name(type), false);
                     }
                 }
                 if (Spawned != None) {
-                    log("SurvivalMod Wave" $ self.WaveCount $ " added " $ type $ " at " $ Point);
+                    log("SurvivalMod wave added " $ type $ " at " $ Point);
                     num++;
                 }
             }
@@ -293,20 +313,89 @@ event Timer() {
             ProcKill.OnGameStarted();
             ProcIncap.OnGameStarted();
             ProcArrest.OnGameStarted();
-            log("SurvivalMod Wave" $ self.WaveCount $ " spawned " $ num $ " suspects");
+            log("SurvivalMod wave spawned " $ num $ " suspects");
             
-            self.WaveCount++;
-            i = self.WaveSpawns - self.WaveCount;
-            if (i > 0) {
-                Level.Game.Broadcast(None, "[c=ff0000]The suspects still have " $ i
+            self.WavesLeft--;
+            if (self.WavesLeft > 0) {
+                Level.Game.Broadcast(None, "[c=ff0000]The suspects still have " $ self.WavesLeft
                     $ " waves of reinforcements available.", 'Caption');
+            } else if (self.WavesLeft == 0) {
+                Level.Game.Broadcast(None,
+                    "[c=00ff00]Good! The suspects have run out of reinforcements.", 'Caption');
             }
         }
     }
 }
 
-event Destroyed() {
-    log("SurvivalMod is about to be destroyed");
-    Super.Destroyed();
+protected function CheckWaveSpawn() {
+    local int alive;
+    local SwatEnemy Enemy;
+
+    if (self.WavesLeft <= 0 || self.SpawnTimer > 0) {
+        return;
+    }
+    alive = 0;
+    foreach DynamicActors(class'SwatEnemy', Enemy) {
+        if (Enemy.IsConscious() && !Enemy.IsArrested()) {
+            alive++;
+        }
+    }
+    if (alive < self.TotalSuspects * self.WaveTrigger) {
+        self.SpawnTimer = 10;
+        Level.Game.Broadcast(None, '', 'TenSecWarning');
+    }
+}
+
+protected function InvestigateNoise(Actor Source) {
+    local int i;
+    local float time;
+    local SwatEnemy Enemy;
+    local EnemyCommanderAction EnemyCmd;
+    if (!self.CheckNoise) {
+        return;
+    }
+    i = 0;
+    time = Level.TimeSeconds;
+
+    foreach DynamicActors(class'SwatEnemy', Enemy) {
+        if ((GoalUpdateTime[i] == 0 || time - GoalUpdateTime[i] > 60.0)
+        && Enemy.IsConscious() && !Enemy.IsArrested() && Rand(8) == 0) {
+            EnemyCmd = Enemy.GetEnemyCommanderAction();
+            EnemyCmd.CreateInvestigateGoal(Source.Location);
+            GoalUpdateTime[i] = time;
+        }
+        i++;
+    }
+}
+
+function OnPawnDied(Pawn Target, Actor Source, bool WasAThreat) {
+    if (Target.IsA('SwatEnemy')) {
+        CheckWaveSpawn();
+        if (Source.IsA('NetPlayerCoop')) {
+            InvestigateNoise(Source);
+        }
+    }
+}
+
+function OnPawnIncapacitated(Pawn Target, Actor Source, bool WasAThreat) {
+    if (Target.IsA('SwatEnemy')) {
+        CheckWaveSpawn();
+        if (Source.IsA('NetPlayerCoop')) {
+            InvestigateNoise(Source);
+        }
+    }
+}
+
+function OnPawnArrested(Pawn Target, Pawn Source) {
+    if (Target.IsA('SwatEnemy')) {
+        CheckWaveSpawn();
+    }
+}
+
+function OnPawnDamaged(Pawn Target, Actor Source) {
+    // This removes use of force penalties only when suspects have not surrendered
+    if (!self.ForcePenalties && Target.IsA('SwatEnemy')) {
+        SwatEnemy(Target).BecomeAThreat();
+    }
 }
 
