@@ -78,43 +78,43 @@ function Display(name type, optional string player, optional string weapon) {
 
     switch (type) {
         case 'EnemyTeamKill':
-            msg = Format("[c=ff0000][b]A suspect[\\b] killed a suspect!");
+            msg = Format("[c=ff0000][b]A suspect[\\b] killed [b]a suspect[\\b]!");
             break;
         case 'EnemyHostageKill':
-            msg = Format("[c=ff0000][b]A suspect[\\b] killed a hostage!");
+            msg = Format("[c=ff0000][b]A suspect[\\b] killed [b]a hostage[\\b]!");
             break;
         case 'EnemyHostageIncap':
-            msg = Format("[c=ff0000][b]A suspect[\\b] incapacitated a hostage!");
+            msg = Format("[c=ff0000][b]A suspect[\\b] incapacitated [b]a hostage[\\b]!");
             break;
         case 'EnemyPlayerKill':
             msg = Format("[c=ff0000][b]%1[\\b] is down!", player);
             break;
         case 'PlayerEnemyKill':
-            msg = Format("[c=0000ff][b]%1[\\b] neutralized a suspect with %2!", player, weapon);
+            msg = Format("[c=0000ff][b]%1[\\b] neutralized [b]a suspect[\\b] with a %2!", player, weapon);
             break;
         case 'PlayerEnemyKillInvalid':
-            msg = Format("[c=0000ff][b]%1[\\b] neutralized a suspect with %2 (unauthorized)!", player, weapon);
+            msg = Format("[c=0000ff][b]%1[\\b] neutralized [b]a suspect[\\b] with a %2 (unauthorized)!", player, weapon);
             break;
         case 'PlayerEnemyIncap':
-            msg = Format("[c=0000ff][b]%1[\\b] incapacitated a suspect with %2!", player, weapon);
+            msg = Format("[c=0000ff][b]%1[\\b] incapacitated [b]a suspect[\\b] with a %2!", player, weapon);
             break;
         case 'PlayerEnemyIncapInvalid':
-            msg = Format("[c=0000ff][b]%1[\\b] incapacitated a suspect with %2 (unauthorized)!", player, weapon);
+            msg = Format("[c=0000ff][b]%1[\\b] incapacitated [b]a suspect[\\b] with a %2 (unauthorized)!", player, weapon);
             break;
         case 'PlayerHostageKill':
-            msg = Format("[c=ff0000][b]%1[\\b] killed a hostage with %2!", player, weapon);
+            msg = Format("[c=ff0000][b]%1[\\b] killed [b]a hostage[\\b] with a %2!", player, weapon);
             break;
         case 'PlayerHostageIncap':
-            msg = Format("[c=ff0000][b]%1[\\b] incapacitated a hostage with %2!", player, weapon);
+            msg = Format("[c=ff0000][b]%1[\\b] incapacitated [b]a hostage[\\b] with a %2!", player, weapon);
             break;
         case 'PlayerEnemyArrest':
-            msg = Format("[c=0000ff][b]%1[\\b] arrested a suspect!", player);
+            msg = Format("[c=0000ff][b]%1[\\b] arrested [b]a suspect[\\b]!", player);
             break;
         case 'PlayerHostageArrest':
-            msg = Format("[c=0000ff][b]%1[\\b] arrested a hostage!", player);
+            msg = Format("[c=0000ff][b]%1[\\b] arrested [b]a hostage[\\b]!", player);
             break;
         case 'PlayerBombDefused':
-            msg = Format("[c=0000ff][b]%1[\\b] defused a bomb!", player);
+            msg = Format("[c=0000ff][b]%1[\\b] defused [b]a bomb[\\b]!", player);
             break;
         default:
             return;

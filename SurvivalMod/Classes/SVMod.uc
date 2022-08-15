@@ -11,7 +11,7 @@ class SVMod extends SwatGame.SwatMutator
                IInterested_GameEvent_PawnDamaged,
                IInterestedInDoorOpening;
 
-const VERSION = "1.2";
+const VERSION = "1.3";
 const MAX_ITER = 200;
 
 var config bool Enabled;

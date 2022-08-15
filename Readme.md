@@ -34,26 +34,50 @@ ServerActors=SurvivalMod.SVMod
 [SurvivalMod.SVMod]
 ; Allow starting Survival Mod (True/False).
 Enabled=True
+
 ; Enforce unauthorized use of force penalties during gameplay (True/False).
 ; If the suspects drop their weapons, use of force is penalized in any case.
 ForcePenalties=True
+
 ; Choose how often to open doors randomly at the round start.
 ; Values allowed: 0-100, 0 = disable this feature.
 RandomDoors=25
+
 ; After spawning the normal suspects, add more until at least this count is reached.
 AmountMin=15
+
 ; After previous step, add this many suspects regardless of the existing count.
 AmountExtra=10
+
 ; Skip spawn points that are this close to player spawns (default is usually good).
 MinDistance=300.0
+
 ; Spawn this many waves of new suspects when the trigger is reached (zero or more).
 WaveSpawns=1
+
 ; Spawn a new wave when less than this proportion of the initial suspects are active.
 ; Floating point value allowed, zero to one. 0.5 = half of the initial count.
 WaveTrigger=0.5
+
 ; Spawn wave size compared to the initial suspect count.
 ; Floating point value allowed, more than zero.
 WaveSize=0.5
+
+; Set skill value for all archetypes spawned by the mod (0=low, 1=medium, 2=high).
+; Comment out to use default values.
+;EnemySkill=2
+
+; Set minimum morale value for all archetypes spawned by the mod. Floating point value allowed.
+; Comment out to use default values.
+;EnemyMinMorale=2.0
+
+; Set maximum morale value for all archetypes spawned by the mod. Floating point value allowed.
+; Comment out to use default values.
+;EnemyMaxMorale=3.0
+
+; Try to spawn similar archetypes as specified by the default mission (True/False).
+; If no suitable archetypes are found from the level, the mod uses custom archetypes.
+StoryArchetypes=False
 
 ; Choose any archetypes from EnemyArchetypes.ini.
 ; One or more must be specified and will be chosen randomly.
@@ -86,6 +110,11 @@ ServerActors=EventLogger.EventMod
 
 Changelog
 ---------
+### v1.3
+* Suspect awareness is increased and they are much more likely to watch nearby doors as they are opened.
+* Add new config options: StoryArchetypes, EnemySkill, EnemyMinMorale, EnemyMaxMorale. By default these are disabled.
+* Small adjustments to Event Logger messages.
+
 ### v1.2
 * Add new config option ForcePenalties to choose if the game should enforce unauthorized use of force penalties.
 * Whenever one of the suspects is neutralized, the others are now much more likely to move to the location to investigate noise.
