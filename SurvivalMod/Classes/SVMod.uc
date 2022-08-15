@@ -8,7 +8,8 @@ class SVMod extends SwatGame.SwatMutator
     implements IInterested_GameEvent_PawnDied,
                IInterested_GameEvent_PawnIncapacitated,
                IInterested_GameEvent_PawnArrested,
-               IInterested_GameEvent_PawnDamaged;
+               IInterested_GameEvent_PawnDamaged,
+               IInterestedInDoorOpening;
 
 const VERSION = "1.2";
 const MAX_ITER = 200;
@@ -16,10 +17,14 @@ const MAX_ITER = 200;
 var config bool Enabled;
 var config bool CheckNoise;
 var config bool ForcePenalties;
+var config bool StoryArchetypes;
 var config int RandomDoors;
 var config int AmountMin;
 var config int AmountExtra;
 var config int WaveSpawns;
+var config int EnemySkill;
+var config float EnemyMinMorale;
+var config float EnemyMaxMorale;
 var config float WaveTrigger;
 var config float WaveSize;
 var config float MinDistance;
@@ -30,25 +35,31 @@ var protected int SpawnTimer;
 var protected int TotalSuspects;
 var protected array<EnemySpawner> AllSpawns;
 var protected array<Actor> AllPoints;
+var protected array<string> LevelArchetypes;
 var protected array<float> GoalUpdateTime;
+var protected array<SwatDoor> DoorSensors;
+var protected SwatGameInfo Game;
 var protected Procedure_KillSuspects ProcKill;
 var protected Procedure_ArrestIncapacitatedSuspects ProcIncap;
 var protected Procedure_ArrestUnIncapacitatedSuspects ProcArrest;
-var protected SwatGameInfo Game;
 
 defaultproperties
 {
     Enabled = True
     CheckNoise = True
     ForcePenalties = True
+    StoryArchetypes = False
     RandomDoors = 25
     AmountMin = 10
     AmountExtra = 10
     WaveSpawns = 0
+    EnemySkill = -1;
+    EnemyMinMorale = -1;
+    EnemyMaxMorale = -1;
 }
 
 
-public function PreBeginPlay() {
+function PreBeginPlay() {
     Super.PreBeginPlay();
 
    if (Level.NetMode == NM_ListenServer || Level.NetMode == NM_DedicatedServer) {
@@ -63,6 +74,10 @@ public function PreBeginPlay() {
 }
 
 function UnRegisterGameEventsHook() {
+    while (DoorSensors.Length > 0) {
+        DoorSensors[0].UnRegisterInterestedInDoorOpening(self);
+        DoorSensors.Remove(0, 1);
+    }
     self.Game.GameEvents.PawnDied.UnRegister(self);
     self.Game.GameEvents.PawnIncapacitated.UnRegister(self);
     self.Game.GameEvents.PawnArrested.UnRegister(self);
@@ -74,12 +89,11 @@ event Destroyed() {
     Super.Destroyed();
 }
 
-public function PostBeginPlay() {
-    local int i, num, minimum;
+function PostBeginPlay() {
+    local int i, j, num, minimum;
     local string type;
     local bool usable;
     local EnemySpawner Spawner;
-    local NavigationPoint Iter;
     local SwatDoor Door;
     local SwatRepo Repo;
     local Procedure Proc;
@@ -87,6 +101,7 @@ public function PostBeginPlay() {
     local SwatMPStartPoint StartPoint;
     local Actor Target;
     local PathNode Node;
+    local Roster Roster;
 
     Super.PostBeginPlay();
     self.WavesLeft = self.WaveSpawns;
@@ -99,7 +114,7 @@ public function PostBeginPlay() {
     self.Game.GameEvents.PawnArrested.Register(self);
     self.Game.GameEvents.PawnDamaged.Register(self);
 
-    log("SurvivalMod v" $ class'SVMod'.const.VERSION $ " by Induktio has been loaded");
+    log("SurvivalMod v" $ VERSION $ " by Induktio has been loaded");
     log("SurvivalMod Archetypes=" $ self.Archetypes.Length $ " Minimum=" $ self.AmountMin $ " Extra=" $ self.AmountExtra
         $ " RandomDoors=" $ self.RandomDoors $ " MinDistance=" $ self.MinDistance $ " WaveSpawns=" $ self.WaveSpawns
         $ " WaveTrigger=" $ self.WaveTrigger $ " WaveSize=" $ self.WaveSize);
@@ -115,6 +130,20 @@ public function PostBeginPlay() {
             i++;
         }
     }
+
+    for (i = 0; self.StoryArchetypes && i < SpawningManager(Level.SpawningManager).Rosters.Length; ++i) {
+        Roster = SpawningManager(Level.SpawningManager).Rosters[i];
+        if (Roster.ArchetypeClass != class'SwatGame.EnemyArchetype'
+        || Roster.Count.Min < 2 || Roster.Count.Max < 2) {
+            continue;
+        }
+        for (j = 0; j < Roster.Archetypes.Length; ++j) {
+            log("ARCH "$ Roster.Archetypes[j].Chance);
+            log("ARCH "$ Roster.Archetypes[j].Archetype);
+            LevelArchetypes[ LevelArchetypes.Length ] = string(Roster.Archetypes[j].Archetype);
+        }
+    }
+
     i = 0;
     foreach SwatGameInfo(Level.Game).AllActors(class'SwatMPStartPoint', StartPoint) {
         StartPoints[i] = StartPoint;
@@ -155,11 +184,15 @@ public function PostBeginPlay() {
         minimum = self.AmountMin - self.TotalSuspects;
     }
     
-    for (i = 0; num < minimum + self.AmountExtra && i < class'SVMod'.const.MAX_ITER; i++) {
-        type = self.Archetypes[ Rand(self.Archetypes.Length) ];
+    for (i = 0; num < minimum + self.AmountExtra && i < MAX_ITER; i++) {
+        if (self.LevelArchetypes.Length > 0) {
+            type = self.LevelArchetypes[ Rand(self.LevelArchetypes.Length) ];
+        } else {
+            type = self.Archetypes[ Rand(self.Archetypes.Length) ];
+        }
         if (i % 2 == 0 && AllPoints.Length >= 4) {
             Target = AllPoints[ Rand(AllPoints.Length) ];
-            usable = (!PointsNear(StartPoints, Target, true) || i >= class'SVMod'.const.MAX_ITER/2);
+            usable = (!PointsNear(StartPoints, Target, true) || i >= MAX_ITER/2);
             if (usable && PointSpawn(name(type), Target) != None) {
                 log("SurvivalMod added " $ type $ " at " $ Target);
                 self.TotalSuspects++;
@@ -168,7 +201,7 @@ public function PostBeginPlay() {
         } else {
             Spawner = AllSpawns[ Rand(AllSpawns.Length) ];
             usable = ((Spawner.MissionSpawn == MissionSpawn_Any && Spawner.StartPointDependent == StartPoint_Any)
-                || i >= class'SVMod'.const.MAX_ITER/2);
+                || i >= MAX_ITER/2);
             
             if (!Spawner.HasSpawned && usable && Spawner.SpawnArchetype(name(type), false) != None) {
                 log("SurvivalMod added " $ type $ " at " $ Spawner);
@@ -178,27 +211,30 @@ public function PostBeginPlay() {
         }
     }
     log("SurvivalMod TotalSuspects=" $ self.TotalSuspects $ " NewSuspects=" $ num);
-    
-    if (self.RandomDoors > 0) {
-        for(Iter = Level.navigationPointList; Iter != None; Iter = Iter.nextNavigationPoint) {
-            Door = SwatDoor(Iter);
 
-            if (Door != None && Door.bIsAntiPortal) {
-                if (Rand(100) < self.RandomDoors) {
-                    if (Rand(2) == 0) {
-                        log("SurvivalMod Door " $ Door $ " -> OpenLeft");
-                        Door.SetPositionForMove(DoorPosition_OpenLeft, MR_Interacted);
-                        Door.OnUnlocked();
-                    } else {
-                        log("SurvivalMod Door " $ Door $ " -> OpenRight");
-                        Door.SetPositionForMove(DoorPosition_OpenRight, MR_Interacted);
-                        Door.OnUnlocked();
-                    }
+    foreach SwatGameInfo(Level.Game).AllActors(class'SwatDoor', Door) {
+        if (Door == None || Door.IsBroken() || Door.IsEmptyDoorway()) {
+            continue;
+        }
+        if (self.RandomDoors > 0 && Door.bIsAntiPortal) {
+            if (Rand(100) < self.RandomDoors) {
+                if (Rand(2) == 0) {
+                    log("SurvivalMod Door " $ Door $ " -> OpenLeft");
+                    Door.SetPositionForMove(DoorPosition_OpenLeft, MR_Interacted);
+                    Door.OnUnlocked();
                 } else {
-                    log("SurvivalMod Door " $ Door $ " -> NoChange");
+                    log("SurvivalMod Door " $ Door $ " -> OpenRight");
+                    Door.SetPositionForMove(DoorPosition_OpenRight, MR_Interacted);
+                    Door.OnUnlocked();
                 }
-                Door.Moved(true);
+            } else {
+                log("SurvivalMod Door " $ Door $ " -> NoChange");
             }
+            Door.Moved(true);
+        }
+        if (self.CheckNoise) {
+            Door.RegisterInterestedInDoorOpening(self);
+            DoorSensors[ DoorSensors.Length ] = Door;
         }
     }
     if (self.WaveSpawns > 0) {
@@ -229,14 +265,25 @@ protected function bool PlayersNear(array<PlayerController> Players, Actor Targe
     local bool near;
     local int i;
     for (i = 0; i < Players.Length; i++) {
-        near = Players[i].LineOfSightTo(Target);
+        near = Players[i].Pawn.LineOfSightTo(Target);
         if (near) return true;
     }
     return false;
 }
 
+protected function bool PlayersInRange(vector Point, float range) {
+    local PlayerController Player;
+    foreach DynamicActors(class'PlayerController', Player) {
+        if (class'Pawn'.static.checkConscious(Player.Pawn)
+        && VSize2D(Point - Player.Pawn.Location) < range) {
+            return true;
+        }
+    }
+    return false;
+}
+
 protected function Actor PointSpawn(name ArchetypeName, Actor Point) {
-    local Archetype Archetype;
+    local EnemyArchetype Archetype;
     local class<Actor> ClassToSpawn;
     local Actor Spawned;
 
@@ -245,6 +292,25 @@ protected function Actor PointSpawn(name ArchetypeName, Actor Point) {
         return None;
     }
     Archetype.Initialize(Level);
+    if (self.EnemySkill >= 0) {
+        switch (self.EnemySkill) {
+            case 0: Archetype.Skill[0].Skill = EnemySkill_Low; break;
+            case 1: Archetype.Skill[0].Skill = EnemySkill_Medium; break;
+            case 2: Archetype.Skill[0].Skill = EnemySkill_High; break;
+            default: Archetype.Skill[0].Skill = EnemySkill_High;
+        }
+        Archetype.Skill[0].Chance = 100;
+        while (Archetype.Skill.Length > 1) {
+            Archetype.Skill.Remove(1, 1);
+        }
+    }
+    if (self.EnemyMinMorale >= 0) {
+        Archetype.Morale.Min = self.EnemyMinMorale;
+    }
+    if (self.EnemyMaxMorale >= 0) {
+        Archetype.Morale.Max = self.EnemyMaxMorale;
+    }
+
     ClassToSpawn = Archetype.PickClass();
     Spawned = Spawn(ClassToSpawn,,, Point.Location);
     if (Spawned == None) {
@@ -270,9 +336,6 @@ event Timer() {
     if (Repo.GuiConfig.SwatGameState != GAMESTATE_MidGame) {
         return;
     }
-    if (self.ForcePenalties && !self.CheckNoise && self.WavesLeft == 0) {
-        self.Destroy();
-    }
 
     if (self.SpawnTimer > 0) {
         self.SpawnTimer--;
@@ -286,8 +349,12 @@ event Timer() {
                     i++;
                 }
             }
-            for (i = 0; num < self.TotalSuspects * self.WaveSize && i < class'SVMod'.const.MAX_ITER; i++) {
-                type = self.Archetypes[ Rand(self.Archetypes.Length) ];
+            for (i = 0; num < self.TotalSuspects * self.WaveSize && i < MAX_ITER; i++) {
+                if (self.LevelArchetypes.Length > 0) {
+                    type = self.LevelArchetypes[ Rand(self.LevelArchetypes.Length) ];
+                } else {
+                    type = self.Archetypes[ Rand(self.Archetypes.Length) ];
+                }
                 Spawned = None;
                 
                 if (i % 2 == 0 && AllPoints.Length >= 4) {
@@ -298,7 +365,7 @@ event Timer() {
                 } else {
                     Spawner = AllSpawns[ Rand(AllSpawns.Length) ];
                     Point = Spawner;
-                    if (!self.PlayersNear(Players, Spawner) || i >= class'SVMod'.const.MAX_ITER/2) {
+                    if (!self.PlayersNear(Players, Spawner) || i >= MAX_ITER/2) {
                         Spawned = Spawner.SpawnArchetype(name(type), false);
                     }
                 }
@@ -351,6 +418,7 @@ protected function InvestigateNoise(Actor Source) {
     local float time;
     local SwatEnemy Enemy;
     local EnemyCommanderAction EnemyCmd;
+
     if (!self.CheckNoise) {
         return;
     }
@@ -358,11 +426,50 @@ protected function InvestigateNoise(Actor Source) {
     time = Level.TimeSeconds;
 
     foreach DynamicActors(class'SwatEnemy', Enemy) {
-        if ((GoalUpdateTime[i] == 0 || time - GoalUpdateTime[i] > 60.0)
-        && Enemy.IsConscious() && !Enemy.IsArrested() && Rand(8) == 0) {
+        if (GoalUpdateTime.Length <= i) {
+            GoalUpdateTime[i] = 0;
+        }
+        if (Enemy.IsConscious() && !Enemy.IsArrested()
+        && (GoalUpdateTime[i] == 0 || time - GoalUpdateTime[i] > 60.0) && Rand(10) == 0) {
             EnemyCmd = Enemy.GetEnemyCommanderAction();
             EnemyCmd.CreateInvestigateGoal(Source.Location);
             GoalUpdateTime[i] = time;
+        }
+        i++;
+    }
+}
+
+function NotifyDoorOpening(SwatDoor Door) {
+    local int i;
+    local float time;
+    local SwatEnemy Enemy;
+    local EnemyCommanderAction EnemyCmd;
+    local RotateTowardRotationGoal Goal;
+
+    time = Level.TimeSeconds;
+    if (!PlayersInRange(Door.Location, 200.0)) {
+        return;
+    }
+    foreach DynamicActors(class'SwatEnemy', Enemy) {
+        if (GoalUpdateTime.Length <= i) {
+            GoalUpdateTime[i] = 0;
+        }
+        if (Enemy.IsConscious() && !Enemy.IsArrested()
+        && time - GoalUpdateTime[i] > 5.0
+        && VSize2D(Door.Location - Enemy.Location) < 800.0
+        && (Enemy.GetRoomName() == Door.LeftInternalRoomName
+        || Enemy.GetRoomName() == Door.RightInternalRoomName)) {
+
+            EnemyCmd = Enemy.GetEnemyCommanderAction();
+            Goal = new class'RotateTowardRotationGoal'(
+                EnemyCmd.movementResource(),
+                80, // in the range [0, 100]; higher number means higher priority
+                rotator(Door.Location - Enemy.Location));
+
+            Goal.AddRef();
+            Goal.postGoal(EnemyCmd);
+            GoalUpdateTime[i] = time;
+            log("NotifyDoor "$ Door $" "$ Enemy $" Range="$ VSize2D(Door.Location - Enemy.Location) $" Time="$ time);
         }
         i++;
     }
