@@ -18,6 +18,7 @@ var config bool Enabled;
 var config bool CheckNoise;
 var config bool ForcePenalties;
 var config bool StoryArchetypes;
+var config bool SkipBanner;
 var config int RandomDoors;
 var config int AmountMin;
 var config int AmountExtra;
@@ -35,10 +36,12 @@ var protected int SpawnTimer;
 var protected int TotalSuspects;
 var protected array<EnemySpawner> AllSpawns;
 var protected array<Actor> AllPoints;
+var protected array<SwatDoor> AllDoorWays;
 var protected array<string> LevelArchetypes;
-var protected array<float> GoalUpdateTime;
 var protected array<SwatDoor> DoorSensors;
-var protected SwatGameInfo Game;
+var protected array<SwatMPStartPoint> StartPoints;
+var protected SVGoalBase GoalBase;
+var protected GameEventsContainer GameEvents;
 var protected Procedure_KillSuspects ProcKill;
 var protected Procedure_ArrestIncapacitatedSuspects ProcIncap;
 var protected Procedure_ArrestUnIncapacitatedSuspects ProcArrest;
@@ -49,6 +52,7 @@ defaultproperties
     CheckNoise = True
     ForcePenalties = True
     StoryArchetypes = False
+    SkipBanner = False
     RandomDoors = 25
     AmountMin = 10
     AmountExtra = 10
@@ -78,10 +82,11 @@ function UnRegisterGameEventsHook() {
         DoorSensors[0].UnRegisterInterestedInDoorOpening(self);
         DoorSensors.Remove(0, 1);
     }
-    self.Game.GameEvents.PawnDied.UnRegister(self);
-    self.Game.GameEvents.PawnIncapacitated.UnRegister(self);
-    self.Game.GameEvents.PawnArrested.UnRegister(self);
-    self.Game.GameEvents.PawnDamaged.UnRegister(self);
+    GameEvents.PawnDied.UnRegister(self);
+    GameEvents.PawnIncapacitated.UnRegister(self);
+    GameEvents.PawnArrested.UnRegister(self);
+    GameEvents.PawnDamaged.UnRegister(self);
+    GoalBase.ClearAllGoals();
 }
 
 event Destroyed() {
@@ -97,7 +102,6 @@ function PostBeginPlay() {
     local SwatDoor Door;
     local SwatRepo Repo;
     local Procedure Proc;
-    local array<SwatMPStartPoint> StartPoints;
     local SwatMPStartPoint StartPoint;
     local Actor Target;
     local PathNode Node;
@@ -108,11 +112,11 @@ function PostBeginPlay() {
     self.SpawnTimer = 0;
     self.TotalSuspects = 0;
 
-    self.Game = SwatGameInfo(Level.Game);
-    self.Game.GameEvents.PawnDied.Register(self);
-    self.Game.GameEvents.PawnIncapacitated.Register(self);
-    self.Game.GameEvents.PawnArrested.Register(self);
-    self.Game.GameEvents.PawnDamaged.Register(self);
+    GameEvents = SwatGameInfo(Level.Game).GameEvents;
+    GameEvents.PawnDied.Register(self);
+    GameEvents.PawnIncapacitated.Register(self);
+    GameEvents.PawnArrested.Register(self);
+    GameEvents.PawnDamaged.Register(self);
 
     log("SurvivalMod v" $ VERSION $ " by Induktio has been loaded");
     log("SurvivalMod Archetypes=" $ self.Archetypes.Length $ " Minimum=" $ self.AmountMin $ " Extra=" $ self.AmountExtra
@@ -213,10 +217,13 @@ function PostBeginPlay() {
     log("SurvivalMod TotalSuspects=" $ self.TotalSuspects $ " NewSuspects=" $ num);
 
     foreach SwatGameInfo(Level.Game).AllActors(class'SwatDoor', Door) {
-        if (Door == None || Door.IsBroken() || Door.IsEmptyDoorway()) {
+        if (Door != None && !Door.bIsMissionExit) {
+            AllDoorWays[ AllDoorWays.Length ] = Door;
+        }
+        if (Door == None || Door.bIsMissionExit || Door.IsBroken() || Door.IsEmptyDoorway()) {
             continue;
         }
-        if (self.RandomDoors > 0 && Door.bIsAntiPortal) {
+        if (self.RandomDoors > 0) {
             if (Rand(100) < self.RandomDoors) {
                 if (Rand(2) == 0) {
                     log("SurvivalMod Door " $ Door $ " -> OpenLeft");
@@ -237,9 +244,8 @@ function PostBeginPlay() {
             DoorSensors[ DoorSensors.Length ] = Door;
         }
     }
-    if (self.WaveSpawns > 0) {
-        self.SetTimer(1.0, true);
-    }
+    self.GoalBase = new class'SVGoalBase'(Level);
+    self.SetTimer(1.0, true);
 }
 
 protected function bool PointsNear(array<Actor> Points, Actor Target, bool dotrace, optional float mindist) {
@@ -275,7 +281,7 @@ protected function bool PlayersInRange(vector Point, float range) {
     local PlayerController Player;
     foreach DynamicActors(class'PlayerController', Player) {
         if (class'Pawn'.static.checkConscious(Player.Pawn)
-        && VSize2D(Point - Player.Pawn.Location) < range) {
+        && VSize(Point - Player.Pawn.Location) < range) {
             return true;
         }
     }
@@ -336,6 +342,11 @@ event Timer() {
     if (Repo.GuiConfig.SwatGameState != GAMESTATE_MidGame) {
         return;
     }
+    if (!self.SkipBanner) {
+        Level.Game.Broadcast(None, "[c=ffffff][b]Survival Mod v"$ VERSION $"[\\b] is loaded.", 'Caption');
+        self.SkipBanner = True;
+    }
+    GoalBase.UpdateState();
 
     if (self.SpawnTimer > 0) {
         self.SpawnTimer--;
@@ -383,9 +394,12 @@ event Timer() {
             log("SurvivalMod wave spawned " $ num $ " suspects");
             
             self.WavesLeft--;
-            if (self.WavesLeft > 0) {
+            if (self.WavesLeft > 1) {
                 Level.Game.Broadcast(None, "[c=ff0000]The suspects still have " $ self.WavesLeft
                     $ " waves of reinforcements available.", 'Caption');
+            } else if (self.WavesLeft == 1) {
+                Level.Game.Broadcast(None,
+                    "[c=ff0000]The suspects still have one wave of reinforcements available.", 'Caption');
             } else if (self.WavesLeft == 0) {
                 Level.Game.Broadcast(None,
                     "[c=00ff00]Good! The suspects have run out of reinforcements.", 'Caption');
@@ -413,65 +427,89 @@ protected function CheckWaveSpawn() {
     }
 }
 
-protected function InvestigateNoise(Actor Source) {
-    local int i;
-    local float time;
+protected function bool IsAliveIdle(SwatEnemy Enemy) {
+    return Enemy.IsConscious() && !Enemy.IsArrested()
+        && Enemy.HasUsableWeapon() && !Enemy.IsA('SwatUndercover')
+        && (Enemy.GetCurrentState() != EnemyState_Aware
+        || Enemy.GetEnemyCommanderAction().GetCurrentEnemy() == None);
+}
+
+protected function InvestigateNoise(Actor Source, float MaxRange) {
+    local int i, Eid, Doors;
+    local float Time, NoiseRange, ClosestRange, DoorRange;
     local SwatEnemy Enemy;
-    local EnemyCommanderAction EnemyCmd;
+    local Door ClosestDoor;
+    local SwatMPStartPoint StartPoint;
 
     if (!self.CheckNoise) {
         return;
     }
-    i = 0;
-    time = Level.TimeSeconds;
+    Eid = 0;
+    Time = Level.TimeSeconds;
 
     foreach DynamicActors(class'SwatEnemy', Enemy) {
-        if (GoalUpdateTime.Length <= i) {
-            GoalUpdateTime[i] = 0;
+        if (IsAliveIdle(Enemy) && !Enemy.CanHit(Source) 
+        && Time - GoalBase.GetTime(Eid) > 30.0) {
+            NoiseRange = VSize(Enemy.Location - Source.Location);
+            if (NoiseRange > RandRange(MaxRange/4, MaxRange)) {
+                continue;
+            }
+            ClosestRange = 1200;
+            Doors = 0;
+            for (i = 0; i < AllDoorWays.Length; i++) {
+                if (AllDoorWays[i].RightInternalRoomName == Enemy.GetRoomName()
+                || AllDoorWays[i].LeftInternalRoomName == Enemy.GetRoomName()) {
+                    DoorRange = VSize2D(AllDoorWays[i].Location - Source.Location);
+                    Doors++;
+                    if (DoorRange < ClosestRange) {
+                        ClosestDoor = AllDoorWays[i];
+                        ClosestRange = DoorRange;
+                    }
+                }
+            }
+            if (GoalBase.AllowMove(Eid) && Rand(4) == 0) {
+                StartPoint = StartPoints[ Rand(StartPoints.Length) ];
+                if (StartPoint != None && NoiseRange > 600 && Rand(2) == 0)  {
+                    GoalBase.AddInvestigate(Enemy, StartPoint);
+                } else {
+                    GoalBase.AddInvestigate(Enemy, Source);
+                }
+            } else if (ClosestDoor != None && ClosestRange < RandRange(0, 1000)
+            && ClosestRange < VSize2D(Enemy.Location - Source.Location)) {
+                if (Doors > 1) {
+                    GoalBase.AddCoverThreat(Enemy, ClosestDoor, 30, false, NoiseRange > 300);
+                } else {
+                    GoalBase.AddCoverThreat(Enemy, ClosestDoor, 60, false, NoiseRange > 200);
+                }
+            } else {
+                GoalBase.AddAimAround(Enemy, Source, 30);
+            }
+            GoalBase.SetTime(Eid, Time);
         }
-        if (Enemy.IsConscious() && !Enemy.IsArrested()
-        && (GoalUpdateTime[i] == 0 || time - GoalUpdateTime[i] > 60.0) && Rand(10) == 0) {
-            EnemyCmd = Enemy.GetEnemyCommanderAction();
-            EnemyCmd.CreateInvestigateGoal(Source.Location);
-            GoalUpdateTime[i] = time;
-        }
-        i++;
+        Eid++;
     }
 }
 
 function NotifyDoorOpening(SwatDoor Door) {
-    local int i;
-    local float time;
+    local int Eid;
+    local float Time;
     local SwatEnemy Enemy;
-    local EnemyCommanderAction EnemyCmd;
-    local RotateTowardRotationGoal Goal;
 
-    time = Level.TimeSeconds;
     if (!PlayersInRange(Door.Location, 200.0)) {
         return;
     }
+    Time = Level.TimeSeconds;
+    Eid = 0;
     foreach DynamicActors(class'SwatEnemy', Enemy) {
-        if (GoalUpdateTime.Length <= i) {
-            GoalUpdateTime[i] = 0;
-        }
-        if (Enemy.IsConscious() && !Enemy.IsArrested()
-        && time - GoalUpdateTime[i] > 5.0
-        && VSize2D(Door.Location - Enemy.Location) < 800.0
+        if (IsAliveIdle(Enemy) && Time - GoalBase.GetTime(Eid) > 8.0
+        && VSize(Door.Location - Enemy.Location) < 800.0
+        && (Enemy.CanHit(Door) || !GoalBase.HasActiveGoals(Enemy))
         && (Enemy.GetRoomName() == Door.LeftInternalRoomName
         || Enemy.GetRoomName() == Door.RightInternalRoomName)) {
-
-            EnemyCmd = Enemy.GetEnemyCommanderAction();
-            Goal = new class'RotateTowardRotationGoal'(
-                EnemyCmd.movementResource(),
-                80, // in the range [0, 100]; higher number means higher priority
-                rotator(Door.Location - Enemy.Location));
-
-            Goal.AddRef();
-            Goal.postGoal(EnemyCmd);
-            GoalUpdateTime[i] = time;
-            log("NotifyDoor "$ Door $" "$ Enemy $" Range="$ VSize2D(Door.Location - Enemy.Location) $" Time="$ time);
+            GoalBase.AddCoverThreat(Enemy, Door, 30, true, false);
+            GoalBase.SetTime(Eid, Time);
         }
-        i++;
+        Eid++;
     }
 }
 
@@ -479,7 +517,7 @@ function OnPawnDied(Pawn Target, Actor Source, bool WasAThreat) {
     if (Target.IsA('SwatEnemy')) {
         CheckWaveSpawn();
         if (Source.IsA('NetPlayerCoop')) {
-            InvestigateNoise(Source);
+            InvestigateNoise(Source, 1600);
         }
     }
 }
@@ -488,7 +526,7 @@ function OnPawnIncapacitated(Pawn Target, Actor Source, bool WasAThreat) {
     if (Target.IsA('SwatEnemy')) {
         CheckWaveSpawn();
         if (Source.IsA('NetPlayerCoop')) {
-            InvestigateNoise(Source);
+            InvestigateNoise(Source, 1600);
         }
     }
 }
@@ -496,6 +534,9 @@ function OnPawnIncapacitated(Pawn Target, Actor Source, bool WasAThreat) {
 function OnPawnArrested(Pawn Target, Pawn Source) {
     if (Target.IsA('SwatEnemy')) {
         CheckWaveSpawn();
+        if (Source.IsA('NetPlayerCoop')) {
+            InvestigateNoise(Source, 1000);
+        }
     }
 }
 
