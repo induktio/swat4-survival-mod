@@ -110,6 +110,11 @@ ServerActors=EventLogger.EventMod
 
 Changelog
 ---------
+### v1.4
+* Suspect AI has been rewritten to cover open doorways and other threats they notice better. Suspects will also sometimes shoot at opening doors.
+* Suspect movement priorities have been adjusted. Some of them will usually stay barricaded while others will investigate noise.
+* When the round begins, a new message is displayed in the chat that the mod is loaded.
+
 ### v1.3
 * Suspect awareness is increased and they are much more likely to watch nearby doors as they are opened.
 * Add new config options: StoryArchetypes, EnemySkill, EnemyMinMorale, EnemyMaxMorale. By default these are disabled.
